@@ -1,0 +1,361 @@
+
+
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, minimum-scale=1.0, initial-scale=1.0, user-scalable=yes">
+  <title>TimeTracker app</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Source+Code+Pro:400|Roboto:400,300,400italic,500,700|Roboto+Mono">
+  <link rel="stylesheet" href="https://storage.googleapis.comstyles/codelab.css">
+  <style>
+    html {
+        height: 100%;
+        margin: 0;
+        padding: 0;
+    }
+  </style>
+</head>
+
+<body class="codelab-takeover">
+  <div class="codelab__toc">
+    <a href="index.html" class="toc-item toc-item--complete">
+      <span class="toc-item__index">1</span>
+      <span class="toc-item__title">Introduction</span>
+    </a>
+    <a href="step-2.html" class="toc-item toc-item--current">
+      <span class="toc-item__index">2</span>
+      <span class="toc-item__title">A view with a static list</span>
+    </a>
+    <a href="step-3.html" class="toc-item">
+      <span class="toc-item__index">3</span>
+      <span class="toc-item__title">Connecting views</span>
+    </a>
+    <a href="step-4.html" class="toc-item">
+      <span class="toc-item__index">4</span>
+      <span class="toc-item__title">Connect to the webserver</span>
+    </a>
+    <a href="step-5.html" class="toc-item">
+      <span class="toc-item__index">5</span>
+      <span class="toc-item__title">Futures</span>
+    </a>
+    <a href="step-6.html" class="toc-item">
+      <span class="toc-item__index">6</span>
+      <span class="toc-item__title">Automatic refresh</span>
+    </a>
+    <a href="step-7.html" class="toc-item">
+      <span class="toc-item__index">7</span>
+      <span class="toc-item__title">Format date and time</span>
+    </a>
+  </div>
+
+  <div class="codelab__step">
+
+    <div class="step__header">
+      <a href="index.html">
+        <svg fill="#FFFFFF" height="24" viewbox="0 0 24 24" width="24" xmlns="http://www.w3.org/2000/svg">
+          <path d="M0 0h24v24H0z" fill="none"/>
+          <path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/>
+        </svg>
+      </a>
+
+      <a href="https://storage.googleapis.comindex.html" title="Return to home page">
+        <svg fill="#FFFFFF" height="24" viewbox="0 0 24 24" width="24" xmlns="http://www.w3.org/2000/svg">
+          <path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/>
+          <path d="M0 0h24v24H0z" fill="none"/>
+        </svg>
+      </a>
+
+      <a href="step-3.html">
+        <svg fill="#FFFFFF" height="24" viewbox="0 0 24 24" width="24" xmlns="http://www.w3.org/2000/svg">
+          <path d="M0 0h24v24H0z" fill="none"/>
+          <path d="M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z"/>
+        </svg>
+      </a>
+
+      <h1>TimeTracker app</h1>
+    </div>
+
+    <div class="step__body">
+      <h1>TimeTracker app</h1>
+      <h2>2. A view with a static list</h2>
+      <div><p>First step is to create Dart classes to represent the one-level tree that is shown in both the task/projects screen or the intervals screen. In the first case the root is a project, in the second is a task. A Flutter object to display a screen of projects and tasks will get the data to show from this tree. For the moment we will instantiate a fixed fake tree. Later on, the tree will be the answer to a REST query to the webserver.</p><h2>Create the data to show</h2><ul type="1"><li>Launch IntelliJ and create a new Flutter project named <code>codelab_timetracker</code>. Let the wizard create the <code>lib/main.dart</code> file for you.</li><li>Edit <code>pubspec.yaml</code> to add a dependency to the intl Dart library. It will allow us to format dates and times.</li></ul><pre><code>dependencies:
+  intl: ^0.16.1
+  flutter:
+    sdk: flutter
+    cupertino_icons: ^0.1.2
+</code></pre><ul type="1"><li>Add a new Dart file to the lib folder named <code>tree.dart</code> with the following content:</li></ul><pre><code>// see Serializing JSON inside model classes in
+// https://flutter.dev/docs/development/data-and-backend/json
+
+import &#39;package:intl/intl.dart&#39;;
+import &#39;dart:convert&#39; as convert;
+
+final DateFormat _dateFormatter = DateFormat(&#34;yyyy-MM-dd HH:mm:ss&#34;);
+
+abstract class Activity {
+  int id;
+  String name;
+  DateTime initialDate;
+  DateTime finalDate;
+  int duration;
+  List&lt;dynamic&gt; children = List&lt;dynamic&gt;();
+
+  Activity.fromJson(Map&lt;String, dynamic&gt; json)
+      : id = json[&#39;id&#39;],
+        name = json[&#39;name&#39;],
+        initialDate = json[&#39;initialDate&#39;]==null ? null : _dateFormatter.parse(json[&#39;initialDate&#39;]),
+        finalDate = json[&#39;finalDate&#39;]==null ? null : _dateFormatter.parse(json[&#39;finalDate&#39;]),
+        duration = json[&#39;duration&#39;];
+}
+
+
+class Project extends Activity {
+  Project.fromJson(Map&lt;String, dynamic&gt; json) : super.fromJson(json) {
+    if (json.containsKey(&#39;activities&#39;)) { 
+      // json has only 1 level because depth=1 or 0 in time_tracker
+      for (Map&lt;String, dynamic&gt; jsonChild in json[&#39;activities&#39;]) {
+        if (jsonChild[&#39;class&#39;] == &#34;project&#34;) {
+          children.add(Project.fromJson(jsonChild)); 
+          // condition on key avoids infinite recursion
+        } else if (jsonChild[&#39;class&#39;] == &#34;task&#34;) {
+          children.add(Task.fromJson(jsonChild));
+        } else {
+          assert(false);
+        }
+      }
+    }
+  }
+}
+
+
+class Task extends Activity {
+  bool active;
+  Task.fromJson(Map&lt;String, dynamic&gt; json) : super.fromJson(json) {
+    active = json[&#39;active&#39;];
+    for (Map&lt;String, dynamic&gt; jsonChild in json[&#39;intervals&#39;]) {
+      children.add(Interval.fromJson(jsonChild));
+    }
+  }
+}
+
+
+class Interval {
+  int id;
+  DateTime initialDate;
+  DateTime finalDate;
+  int duration;
+  bool active;
+
+  Interval.fromJson(Map&lt;String, dynamic&gt; json)
+      : id = json[&#39;id&#39;],
+        initialDate = json[&#39;initialDate&#39;]==null ? null : _dateFormatter.parse(json[&#39;initialDate&#39;]),
+        finalDate = json[&#39;finalDate&#39;]==null ? null : _dateFormatter.parse(json[&#39;finalDate&#39;]),
+        duration = json[&#39;duration&#39;],
+        active = json[&#39;active&#39;];
+}
+
+
+class Tree {
+  Activity root;
+
+  Tree(Map&lt;String, dynamic&gt; dec) {
+    // 1 level tree, root and children only, root is either Project or Task. If Project
+    // children are Project or Task, that is, Activity. If root is Task, children are Instance.
+    if (dec[&#39;class&#39;] == &#34;project&#34;) {
+      root = Project.fromJson(dec);
+    } else if (dec[&#39;class&#39;] == &#34;task&#34;) {
+      root = Task.fromJson(dec);
+    } else {
+      assert(false);
+    }
+  }
+}
+
+
+Tree getTree() {
+  String strJson = &#34;{&#34;
+      &#34;\&#34;name\&#34;:\&#34;root\&#34;, \&#34;class\&#34;:\&#34;project\&#34;, \&#34;id\&#34;:0, \&#34;initialDate\&#34;:\&#34;2020-09-22 16:04:56\&#34;, \&#34;finalDate\&#34;:\&#34;2020-09-22 16:05:22\&#34;, \&#34;duration\&#34;:26,&#34;
+      &#34;\&#34;activities\&#34;: [ &#34;
+      &#34;{ \&#34;name\&#34;:\&#34;software design\&#34;, \&#34;class\&#34;:\&#34;project\&#34;, \&#34;id\&#34;:1, \&#34;initialDate\&#34;:\&#34;2020-09-22 16:05:04\&#34;, \&#34;finalDate\&#34;:\&#34;2020-09-22 16:05:16\&#34;, \&#34;duration\&#34;:16 },&#34;
+      &#34;{ \&#34;name\&#34;:\&#34;software testing\&#34;, \&#34;class\&#34;:\&#34;project\&#34;, \&#34;id\&#34;:2, \&#34;initialDate\&#34;: null, \&#34;finalDate\&#34;:null, \&#34;duration\&#34;:0 },&#34;
+      &#34;{ \&#34;name\&#34;:\&#34;databases\&#34;, \&#34;class\&#34;:\&#34;project\&#34;, \&#34;id\&#34;:3,  \&#34;finalDate\&#34;:null, \&#34;initialDate\&#34;:null, \&#34;duration\&#34;:0 },&#34;
+      &#34;{ \&#34;name\&#34;:\&#34;transportation\&#34;, \&#34;class\&#34;:\&#34;task\&#34;, \&#34;id\&#34;:6, \&#34;active\&#34;:false, \&#34;initialDate\&#34;:\&#34;2020-09-22 16:04:56\&#34;, \&#34;finalDate\&#34;:\&#34;2020-09-22 16:05:22\&#34;, \&#34;duration\&#34;:10, \&#34;intervals\&#34;:[] }&#34;
+      &#34;] &#34;
+      &#34;}&#34;;
+  Map&lt;String, dynamic&gt; decoded = convert.jsonDecode(strJson);
+  Tree tree = Tree(decoded);
+  return tree;
+}
+
+testLoadTree() {
+  Tree tree = getTree();
+  print(&#34;root name ${tree.root.name}, duration ${tree.root.duration}&#34;);
+  for (Activity act in tree.root.children) {
+    print(&#34;child name ${act.name}, duration ${act.duration}&#34;);
+  }
+}
+
+
+void main() {
+  testLoadTree();
+}
+</code></pre><ul type="1"><li>Read the code, it&#39;s simple: two classes <code>Project</code> and <code>Task</code> inherit from <code>Activity</code> so that we have this as their common type. They contain a named constructor <code>fromJson</code> that takes a dictionary (in Dart, a <code>Map&lt;String, dynamic&gt;</code> whose keys are the JSON fields and dynamic means any type) and sets the attributes. If a date-time is not null then we parse the string to obtain a <code>DateTime</code> value, a type defined in the <code>intl</code> library. In function <code>getTree()</code> we instantiate a sample JSON string and decode it producing a JSON object by means of the <code>convert</code> library. This object is the parameter of the <code>Tree</code> constructor that is just a wrapper of the root of the 1-level tree, either a project or a task object.</li><li>To run this test, Run ⟶ Run... ⟶ Edit configurations... ⟶ + and add a new configuration to the Flutter group with name &#34;test tree&#34; and search file tree.dart for Dart entrypoint.</li></ul><h2>Create the view to show the data</h2><p>Open file <code>main.dart</code> and replace its content by this</p><pre><code>import &#39;package:flutter/material.dart&#39;;
+
+void main() =&gt; runApp(MyApp());
+
+class MyApp extends StatelessWidget {
+  // This widget is the root of your application.
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: &#39;TimeTracker&#39;,
+      theme: ThemeData(
+        primarySwatch: Colors.blue,
+        textTheme: TextTheme(
+            subhead: TextStyle(fontSize:20.0),
+            body1:TextStyle(fontSize:20.0)),
+      ),
+      home: Scaffold(
+        appBar: AppBar(
+          title: Text(&#39;TimeTracker&#39;),
+        ),
+        body: Center(
+          child: Text(&#39;Hello&#39;),
+        ),
+      ),
+    );
+  }
+}
+</code></pre><p>To run this non-interesting main change the run configuration to the default one.</p><p>Now we are going to make the screen that shows the projects and tasks of a <code>Tree</code> object that contains a one-level tree (root plus children only, being the root a project).</p><ul type="1"><li>Create a new Dart file in <code>lib</code> folder named <code>page_activities.dart</code>. The file is empty.</li><li>Edit this file and write <code>stful</code> and upon pressing Return this code will appear</li></ul><pre><code>class  extends StatefulWidget {
+  @override
+  _State createState() =&gt; _State();
+}
+
+class _State extends State&lt;&gt; {
+  @override
+  Widget build(BuildContext context) {
+    return Container();
+  }
+}
+</code></pre><ul type="1"><li>This is a template we have to complete by specifying some class names:</li></ul><pre><code>class PageActivities extends StatefulWidget {
+  @override
+  _PageActivitiesState createState() =&gt; _PageActivitiesState();
+}
+
+class _PageActivitiesState extends State&lt;PageActivities&gt; {
+  @override
+  Widget build(BuildContext context) {
+    return Container();
+  }
+}
+</code></pre><ul type="1"><li>There are some errors because we still have to import a library defining the classes Widget, State etc. Add it:</li></ul><pre><code>import &#39;package:flutter/material.dart&#39;;
+</code></pre><ul type="1"><li>class <code>PageActivitiesState</code> is in charge of getting the data to show, which is the state. When the state changes the page will automatically be redrawn with the new data. For now let&#39;s just get the <code>Tree</code> object from the <code>getTree()</code> whe have created in <code>tree.dart</code>:</li></ul><pre><code>import &#39;package:codelab_timetracker/tree.dart&#39;;
+import &#39;package:flutter/material.dart&#39;;
+
+class PageActivities extends StatefulWidget {
+  @override
+  _PageActivitiesState createState() =&gt; _PageActivitiesState();
+}
+
+class _PageActivitiesState extends State&lt;PageActivities&gt; {
+  Tree tree;
+  
+  @override
+  void initState() {
+    super.initState();
+    tree = getTree();
+  }
+  
+  @override
+  Widget build(BuildContext context) {
+    return Container();
+  }
+}
+</code></pre><ul type="1"><li>Now we are going to edit the <code>build()</code> method so that it draws a list view whose items are the childs of the tree. Relace the build method by this:</li></ul><pre><code>@override
+Widget build(BuildContext context) {
+  return Scaffold(
+          appBar: AppBar(
+            title: Text(tree.root.name),
+            actions: &lt;Widget&gt;[
+              IconButton(icon: Icon(Icons.home),
+                  onPressed: () {} 
+                  // TODO go home page = root
+              ),
+              //TODO other actions
+            ],
+          ),
+          body: ListView.separated(
+            // it&#39;s like ListView.builder() but better 
+            // because it includes a separator between items
+            padding: const EdgeInsets.all(16.0),
+            itemCount: tree.root.children.length,
+            itemBuilder: (BuildContext context, int index) =&gt;
+                _buildRow(tree.root.children[index], index),
+            separatorBuilder: (BuildContext context, int index) =&gt;
+            const Divider(),
+          ),
+        );
+}
+</code></pre><ul type="1"><li>Note that the named constructor of <code>Listview</code> has a parameter <code>itemBuilder</code> that expects a function returning the widget to show as a certain position (index) of the list. This function is <code>_buildRow()</code>:</li></ul><pre><code>Widget _buildRow(Activity activity, int index) {
+  String strDuration = Duration(seconds: activity.duration).toString().split(&#39;.&#39;).first;
+  // split by &#39;.&#39; and taking first element of resulting list
+  // removes the microseconds part
+  if (activity is Project) {
+    return ListTile(
+      title: Text(&#39;${activity.name}&#39;),
+      trailing: Text(&#39;$strDuration&#39;),
+      onTap: () =&gt; {}, 
+      // TODO, navigate down to show children tasks and projects
+    );
+  } else if (activity is Task) {
+    Task task = activity as Task;
+    Widget trailing;
+    trailing = Text(&#39;$strDuration&#39;);
+    return ListTile(
+      title: Text(&#39;${activity.name}&#39;),
+      trailing: trailing,
+      onTap: () =&gt; {}, 
+      // TODO, navigate down to show intervals
+      onLongPress: () {}, 
+      // TODO start/stop counting the time for tis task
+    );
+  }
+}
+</code></pre><ul type="1"><li>Finally in <code>main.dart</code> replace <code>home: Scaffold(...)</code> object by:</li></ul><pre><code>home: PageActivities()
+</code></pre><p>Now run again with hot reload <img src="img/67df160a82d9bafd.png"/> and this is what we get:</p><p><img src="img/99125c6fcabfb538.png"/></p></div>
+    </div>
+
+  </div>
+
+  <script>
+    (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+    (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+    m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+    })(window,document,'script','https://www.google-analytics.com/analytics.js','ga');
+
+    ga('create', 'UA-49880327-14', 'auto');
+
+    (function() {
+      var gaCodelab = '';
+      if (gaCodelab) {
+        ga('create', gaCodelab, 'auto', {name: 'codelab'});
+      }
+
+      var gaView;
+      var parts = location.search.substring(1).split('&');
+      for (var i = 0; i < parts.length; i++) {
+        var param = parts[i].split('=');
+        if (param[0] === 'viewga') {
+          gaView = param[1];
+          break;
+        }
+      }
+      if (gaView && gaView !== gaCodelab) {
+        ga('create', gaView, 'auto', {name: 'view'});
+      }
+    })();
+  </script>
+  <script src="https://storage.googleapis.comscripts/codelab.js" async></script>
+</body>
+</html>

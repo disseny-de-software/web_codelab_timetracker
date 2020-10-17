@@ -1,0 +1,1073 @@
+
+<!doctype html>
+
+<html>
+<head>
+  <meta name="viewport" content="width=device-width, minimum-scale=1.0, initial-scale=1.0, user-scalable=yes">
+  <meta name="theme-color" content="#4F7DC9">
+  <meta charset="UTF-8">
+  <title>TimeTracker app</title>
+  <link rel="stylesheet" href="//fonts.googleapis.com/css?family=Source+Code+Pro:400|Roboto:400,300,400italic,500,700|Roboto+Mono">
+  <link rel="stylesheet" href="//fonts.googleapis.com/icon?family=Material+Icons">
+  <link rel="stylesheet" href="https://storage.googleapis.com/codelab-elements/codelab-elements.css">
+  <style>
+    .success {
+      color: #1e8e3e;
+    }
+    .error {
+      color: red;
+    }
+  </style>
+</head>
+<body>
+  <google-codelab-analytics gaid="UA-49880327-14"></google-codelab-analytics>
+  <google-codelab codelab-gaid=""
+                  id="timetracker-in-flutter"
+                  title="TimeTracker app"
+                  environment="web"
+                  feedback-link="cv.uab.es">
+    
+      <google-codelab-step label="Introduction" duration="2">
+        <p>This tutorial has two goals:</p>
+<ul>
+<li>learn how to make a simple user interface in Flutter</li>
+<li>build the base of the time tracker app that you have to do for the practicum</li>
+</ul>
+<p>A base means that some parts of the code you&#39;ll probably want to keep them, but others related to the user interface appearance, will definitely to be changed.</p>
+<p>This is what we are going to build:</p>
+<p class="image-container"><img src="img/65d400fe6fd48e3b.gif"></p>
+<p>What this animation shows is :</p>
+<ul>
+<li>two types of screens, one for projects and tasks, another for intervals</li>
+<li>navigation down and up plus a go home button</li>
+<li>long press on a task item starts/stops its timer, creating a new interval</li>
+<li>periodic uptade of the interface every 6 seconds, that is, the app requests the webserver to update what it shows</li>
+<li>likewise, navigation up and down, go home, start and stop send requests also to the server</li>
+</ul>
+<p>Preconditions:</p>
+<ul>
+<li>you have installed Flutter into IntelliJ. If not, see how to in the practicum handout</li>
+<li>you have read the slides on Dart and Fluttet</li>
+<li>same with the slides on Flutter &#34;futures&#34;</li>
+<li>optionally you have also gone through the getting started codelab in <a href="http://flutter.dev" target="_blank">flutter.dev</a></li>
+</ul>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="A view with a static list" duration="3">
+        <p>First step is to create Dart classes to represent the one-level tree that is shown in both the task/projects screen or the intervals screen. In the first case the root is a project, in the second is a task. A Flutter object to display a screen of projects and tasks will get the data to show from this tree. For the moment we will instantiate a fixed fake tree. Later on, the tree will be the answer to a REST query to the webserver.</p>
+<h2 is-upgraded>Create the data to show</h2>
+<p><strong>1.</strong> Launch IntelliJ and create a new Flutter project named <code>codelab_timetracker</code>. Let the wizard create the <code>lib/main.dart</code> file for you.</p>
+<p><strong>2.</strong> Edit <code>pubspec.yaml</code> to add a dependency to the intl Dart library. It will allow us to format dates and times.</p>
+<pre><code>dependencies:
+  intl: ^0.16.1
+  flutter:
+    sdk: flutter
+    cupertino_icons: ^0.1.2
+</code></pre>
+<p><strong>3.</strong> Add a new Dart file to the lib folder named <code>tree.dart</code> with the following content:</p>
+<pre><code>// see Serializing JSON inside model classes in
+// https://flutter.dev/docs/development/data-and-backend/json
+
+import &#39;package:intl/intl.dart&#39;;
+import &#39;dart:convert&#39; as convert;
+
+final DateFormat _dateFormatter = DateFormat(&#34;yyyy-MM-dd HH:mm:ss&#34;);
+
+abstract class Activity {
+  int id;
+  String name;
+  DateTime initialDate;
+  DateTime finalDate;
+  int duration;
+  List&lt;dynamic&gt; children = List&lt;dynamic&gt;();
+
+  Activity.fromJson(Map&lt;String, dynamic&gt; json)
+      : id = json[&#39;id&#39;],
+        name = json[&#39;name&#39;],
+        initialDate = json[&#39;initialDate&#39;]==null ? null : _dateFormatter.parse(json[&#39;initialDate&#39;]),
+        finalDate = json[&#39;finalDate&#39;]==null ? null : _dateFormatter.parse(json[&#39;finalDate&#39;]),
+        duration = json[&#39;duration&#39;];
+}
+
+
+class Project extends Activity {
+  Project.fromJson(Map&lt;String, dynamic&gt; json) : super.fromJson(json) {
+    if (json.containsKey(&#39;activities&#39;)) { 
+      // json has only 1 level because depth=1 or 0 in time_tracker
+      for (Map&lt;String, dynamic&gt; jsonChild in json[&#39;activities&#39;]) {
+        if (jsonChild[&#39;class&#39;] == &#34;project&#34;) {
+          children.add(Project.fromJson(jsonChild)); 
+          // condition on key avoids infinite recursion
+        } else if (jsonChild[&#39;class&#39;] == &#34;task&#34;) {
+          children.add(Task.fromJson(jsonChild));
+        } else {
+          assert(false);
+        }
+      }
+    }
+  }
+}
+
+
+class Task extends Activity {
+  bool active;
+  Task.fromJson(Map&lt;String, dynamic&gt; json) : super.fromJson(json) {
+    active = json[&#39;active&#39;];
+    for (Map&lt;String, dynamic&gt; jsonChild in json[&#39;intervals&#39;]) {
+      children.add(Interval.fromJson(jsonChild));
+    }
+  }
+}
+
+
+class Interval {
+  int id;
+  DateTime initialDate;
+  DateTime finalDate;
+  int duration;
+  bool active;
+
+  Interval.fromJson(Map&lt;String, dynamic&gt; json)
+      : id = json[&#39;id&#39;],
+        initialDate = json[&#39;initialDate&#39;]==null ? null : _dateFormatter.parse(json[&#39;initialDate&#39;]),
+        finalDate = json[&#39;finalDate&#39;]==null ? null : _dateFormatter.parse(json[&#39;finalDate&#39;]),
+        duration = json[&#39;duration&#39;],
+        active = json[&#39;active&#39;];
+}
+
+
+class Tree {
+  Activity root;
+
+  Tree(Map&lt;String, dynamic&gt; dec) {
+    // 1 level tree, root and children only, root is either Project or Task. If Project
+    // children are Project or Task, that is, Activity. If root is Task, children are Instance.
+    if (dec[&#39;class&#39;] == &#34;project&#34;) {
+      root = Project.fromJson(dec);
+    } else if (dec[&#39;class&#39;] == &#34;task&#34;) {
+      root = Task.fromJson(dec);
+    } else {
+      assert(false);
+    }
+  }
+}
+
+
+Tree getTree() {
+  String strJson = &#34;{&#34;
+      &#34;\&#34;name\&#34;:\&#34;root\&#34;, \&#34;class\&#34;:\&#34;project\&#34;, \&#34;id\&#34;:0, \&#34;initialDate\&#34;:\&#34;2020-09-22 16:04:56\&#34;, \&#34;finalDate\&#34;:\&#34;2020-09-22 16:05:22\&#34;, \&#34;duration\&#34;:26,&#34;
+      &#34;\&#34;activities\&#34;: [ &#34;
+      &#34;{ \&#34;name\&#34;:\&#34;software design\&#34;, \&#34;class\&#34;:\&#34;project\&#34;, \&#34;id\&#34;:1, \&#34;initialDate\&#34;:\&#34;2020-09-22 16:05:04\&#34;, \&#34;finalDate\&#34;:\&#34;2020-09-22 16:05:16\&#34;, \&#34;duration\&#34;:16 },&#34;
+      &#34;{ \&#34;name\&#34;:\&#34;software testing\&#34;, \&#34;class\&#34;:\&#34;project\&#34;, \&#34;id\&#34;:2, \&#34;initialDate\&#34;: null, \&#34;finalDate\&#34;:null, \&#34;duration\&#34;:0 },&#34;
+      &#34;{ \&#34;name\&#34;:\&#34;databases\&#34;, \&#34;class\&#34;:\&#34;project\&#34;, \&#34;id\&#34;:3,  \&#34;finalDate\&#34;:null, \&#34;initialDate\&#34;:null, \&#34;duration\&#34;:0 },&#34;
+      &#34;{ \&#34;name\&#34;:\&#34;transportation\&#34;, \&#34;class\&#34;:\&#34;task\&#34;, \&#34;id\&#34;:6, \&#34;active\&#34;:false, \&#34;initialDate\&#34;:\&#34;2020-09-22 16:04:56\&#34;, \&#34;finalDate\&#34;:\&#34;2020-09-22 16:05:22\&#34;, \&#34;duration\&#34;:10, \&#34;intervals\&#34;:[] }&#34;
+      &#34;] &#34;
+      &#34;}&#34;;
+  Map&lt;String, dynamic&gt; decoded = convert.jsonDecode(strJson);
+  Tree tree = Tree(decoded);
+  return tree;
+}
+
+testLoadTree() {
+  Tree tree = getTree();
+  print(&#34;root name ${tree.root.name}, duration ${tree.root.duration}&#34;);
+  for (Activity act in tree.root.children) {
+    print(&#34;child name ${act.name}, duration ${act.duration}&#34;);
+  }
+}
+
+
+void main() {
+  testLoadTree();
+}
+</code></pre>
+<p><strong>4.</strong> Read the code, it&#39;s simple: two classes <code>Project</code> and <code>Task</code> inherit from <code>Activity</code> so that we have this as their common type. They contain a named constructor <code>fromJson</code> that takes a dictionary (in Dart, a <code>Map&lt;String, dynamic&gt;</code> whose keys are the JSON fields and dynamic means any type) and sets the attributes. If a date-time is not null then we parse the string to obtain a <code>DateTime</code> value, a type defined in the <code>intl</code> library.</p>
+<p>In function <code>getTree()</code> we instantiate a sample JSON string and decode it producing a JSON object by means of the <code>convert</code> library. This object is the parameter of the <code>Tree</code> constructor that is just a wrapper of the root of the 1-level tree, either a project or a task object.</p>
+<p><strong>5.</strong> To run this test, Run ⟶ Run... ⟶ Edit configurations... ⟶ + and add a new configuration to the Flutter group with name &#34;test tree&#34; and search file tree.dart for Dart entrypoint.</p>
+<h2 is-upgraded>Create the view to show the data</h2>
+<p><strong>1.</strong> Open file <code>main.dart</code> and replace its content by this</p>
+<pre><code>import &#39;package:flutter/material.dart&#39;;
+
+void main() =&gt; runApp(MyApp());
+
+class MyApp extends StatelessWidget {
+  // This widget is the root of your application.
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: &#39;TimeTracker&#39;,
+      theme: ThemeData(
+        primarySwatch: Colors.blue,
+        textTheme: TextTheme(
+            subhead: TextStyle(fontSize:20.0),
+            body1:TextStyle(fontSize:20.0)),
+      ),
+      home: Scaffold(
+        appBar: AppBar(
+          title: Text(&#39;TimeTracker&#39;),
+        ),
+        body: Center(
+          child: Text(&#39;Hello&#39;),
+        ),
+      ),
+    );
+  }
+}
+</code></pre>
+<p>To run this non-interesting main change the run configuration to the default one.</p>
+<p>Now we are going to make the screen that shows the projects and tasks of a <code>Tree</code> object that contains a one-level tree (root plus children only, being the root a project).</p>
+<p><strong>2.</strong> Create a new Dart file in <code>lib</code> folder named <code>page_activities.dart</code>. The file is empty.</p>
+<p><strong>3.</strong> Edit this file and write <code>stful</code> and upon pressing Return this code will appear</p>
+<pre><code>class  extends StatefulWidget {
+  @override
+  _State createState() =&gt; _State();
+}
+
+class _State extends State&lt;&gt; {
+  @override
+  Widget build(BuildContext context) {
+    return Container();
+  }
+}
+</code></pre>
+<p><strong>4.</strong> This is a template we have to complete by specifying some class names:</p>
+<pre><code>class PageActivities extends StatefulWidget {
+  @override
+  _PageActivitiesState createState() =&gt; _PageActivitiesState();
+}
+
+class _PageActivitiesState extends State&lt;PageActivities&gt; {
+  @override
+  Widget build(BuildContext context) {
+    return Container();
+  }
+}
+</code></pre>
+<p><strong>5.</strong> There are some errors because we still have to import a library defining the classes Widget, State etc. Add it:</p>
+<pre><code>import &#39;package:flutter/material.dart&#39;;
+</code></pre>
+<p><strong>6.</strong> Class <code>PageActivitiesState</code> is in charge of getting the data to show, which is the state. When the state changes the page will automatically be redrawn with the new data. For now let&#39;s just get the <code>Tree</code> object from the <code>getTree()</code> whe have created in <code>tree.dart</code> :</p>
+<pre><code>import &#39;package:codelab_timetracker/tree.dart&#39;;
+import &#39;package:flutter/material.dart&#39;;
+
+class PageActivities extends StatefulWidget {
+  @override
+  _PageActivitiesState createState() =&gt; _PageActivitiesState();
+}
+
+class _PageActivitiesState extends State&lt;PageActivities&gt; {
+  Tree tree;
+  
+  @override
+  void initState() {
+    super.initState();
+    tree = getTree();
+  }
+  
+  @override
+  Widget build(BuildContext context) {
+    return Container();
+  }
+}
+</code></pre>
+<p><strong>7.</strong> Now we are going to edit the <code>build()</code> method so that it draws a list view whose items are the childs of the tree. Relace the build method by this:</p>
+<pre><code>@override
+Widget build(BuildContext context) {
+  return Scaffold(
+          appBar: AppBar(
+            title: Text(tree.root.name),
+            actions: &lt;Widget&gt;[
+              IconButton(icon: Icon(Icons.home),
+                  onPressed: () {} 
+                  // TODO go home page = root
+              ),
+              //TODO other actions
+            ],
+          ),
+          body: ListView.separated(
+            // it&#39;s like ListView.builder() but better 
+            // because it includes a separator between items
+            padding: const EdgeInsets.all(16.0),
+            itemCount: tree.root.children.length,
+            itemBuilder: (BuildContext context, int index) =&gt;
+                _buildRow(tree.root.children[index], index),
+            separatorBuilder: (BuildContext context, int index) =&gt;
+            const Divider(),
+          ),
+        );
+}
+</code></pre>
+<p><strong>8.</strong> Note that the named constructor of <code>Listview</code> has a parameter <code>itemBuilder</code> that expects a function returning the widget to show as a certain position (index) of the list. This function is <code>_buildRow()</code>:</p>
+<pre><code>Widget _buildRow(Activity activity, int index) {
+  String strDuration = Duration(seconds: activity.duration).toString().split(&#39;.&#39;).first;
+  // split by &#39;.&#39; and taking first element of resulting list
+  // removes the microseconds part
+  if (activity is Project) {
+    return ListTile(
+      title: Text(&#39;${activity.name}&#39;),
+      trailing: Text(&#39;$strDuration&#39;),
+      onTap: () =&gt; {}, 
+      // TODO, navigate down to show children tasks and projects
+    );
+  } else if (activity is Task) {
+    Task task = activity as Task;
+    Widget trailing;
+    trailing = Text(&#39;$strDuration&#39;);
+    return ListTile(
+      title: Text(&#39;${activity.name}&#39;),
+      trailing: trailing,
+      onTap: () =&gt; {}, 
+      // TODO, navigate down to show intervals
+      onLongPress: () {}, 
+      // TODO start/stop counting the time for tis task
+    );
+  }
+}
+</code></pre>
+<p><strong>9.</strong> Finally in <code>main.dart</code> replace <code>home: Scaffold(...)</code> object by:</p>
+<pre><code>home: PageActivities()
+</code></pre>
+<p><strong>10.</strong> Now run again with hot reload <img src="img/67df160a82d9bafd.png"> and this is what we get:</p>
+<p class="image-container"><img src="img/99125c6fcabfb538.png"></p>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="Connecting views" duration="4">
+        <p>We are going to make another screen to show the intervals of a task. This is necessary because the data to show for intervals is different from that of projects and tasks. In a second step we&#39;ll link task transportation to this new screen. That is, when you tap on <code>transportation</code> you&#39;ll see its intervals.</p>
+<p><strong>1.</strong> We&#39;ll begin by creating the data to show. Go to <code>tree.dart</code> and add this function:</p>
+<pre><code>Tree getTreeTask() {
+  String strJson = &#34;{&#34;
+   &#34;\&#34;name\&#34;:\&#34;transportation\&#34;,\&#34;class\&#34;:\&#34;task\&#34;, \&#34;initialDate\&#34;:\&#34;2020-09-22 13:36:08\&#34;, \&#34;finalDate\&#34;:\&#34;2020-09-22 13:36:34\&#34;, \&#34;duration\&#34;:10,&#34;
+   &#34;\&#34;intervals\&#34;:[&#34;
+    &#34;{\&#34;class\&#34;:\&#34;interval\&#34;, \&#34;initialDate\&#34;:\&#34;2020-09-22 13:36:08\&#34;, \&#34;finalDate\&#34;:\&#34;2020-09-22 13:36:14\&#34;, \&#34;duration\&#34;:6 },&#34;
+    &#34;{\&#34;class\&#34;:\&#34;interval\&#34;, \&#34;initialDate\&#34;:\&#34;2020-09-22 13:36:30\&#34;, \&#34;finalDate\&#34;:\&#34;2020-09-22 13:36:34\&#34;, \&#34;duration\&#34;:4}&#34;
+   &#34;]}&#34;;
+  Map&lt;String, dynamic&gt; decoded = convert.jsonDecode(strJson);
+  Tree tree = Tree(decoded);
+  return tree;
+}
+</code></pre>
+<p><strong>2.</strong> Add a new file <code>PageIntervals.dart</code> to the <code>lib</code> folder and like before write <code>stful</code> to get the template and insert the proper class names:</p>
+<pre><code>import &#39;package:flutter/material.dart&#39;;
+
+
+class PageIntervals extends StatefulWidget {
+  @override
+  _PageIntervalsState createState() =&gt; _PageIntervalsState();
+}
+
+class _PageIntervalsState extends State&lt;PageIntervals&gt; {
+  @override
+  Widget build(BuildContext context) {
+    return Container();
+  }
+}
+</code></pre>
+<p><strong>3.</strong> Add to class <code>_PageIntervalsState</code> the methods <code>initState()</code>, <code>build()</code> and <code>_buildRow()</code> analogous to those of <code>PageActivities</code>.</p>
+<p>We need class <code>Interval</code> from <code>tree.dart</code> but this class already exists in another Dart library so we have to disambiguate with a prefix:</p>
+<pre><code>import &#39;package:codelab_timetracker/tree.dart&#39; as Tree;
+// to avoid collision with an Interval class in another library
+</code></pre>
+<pre><code>Tree.Tree tree;
+
+@override
+void initState() {
+  super.initState();
+  tree = Tree.getTreeTask(); 
+  // the root is a task and the children its intervals
+}
+</code></pre>
+<pre><code>@override
+Widget build(BuildContext context) {
+  return Scaffold(
+    appBar: AppBar(
+      title: Text(tree.root.name),
+      actions: &lt;Widget&gt;[
+        IconButton(icon: Icon(Icons.home),
+            onPressed: () {} // TODO go home page = root
+        ),
+        //TODO other actions
+      ],
+    ),
+    body: ListView.separated(
+      // it&#39;s like ListView.builder() but better because it includes a
+      // separator between items
+      padding: const EdgeInsets.all(16.0),
+      itemCount: tree.root.children.length, // number of intervals
+      itemBuilder: (BuildContext context, int index) =&gt;
+          _buildRow(tree.root.children[index], index),
+      separatorBuilder: (BuildContext context, int index) =&gt;
+      const Divider(),
+    ),
+  );
+}
+</code></pre>
+<pre><code>Widget _buildRow(Tree.Interval interval, int index) {
+  String strDuration = Duration(seconds: interval.duration).toString().split(&#39;.&#39;).first;
+  String strInitialDate = interval.initialDate.toString().split(&#39;.&#39;)[0];
+  // this removes the microseconds part
+  String strFinalDate = interval.finalDate.toString().split(&#39;.&#39;)[0];
+  return ListTile(
+    title: Text(&#39;from ${strInitialDate} to ${strFinalDate}&#39;),
+    trailing: Text(&#39;$strDuration&#39;),
+  );
+}
+</code></pre>
+<p><strong>4.</strong> Just to check it works, in <code>main.dart</code> change the <code>home</code> attribute and reload the app. Once done undo the change.</p>
+<pre><code>home: PageIntervals() //PageActivities()
+</code></pre>
+<p><strong>5.</strong> To connect the two pages go to <code>page_activities.dart</code> and provide a method to the <code>onTap</code> parameter of <code>ListTile</code> in <code>_PageActivitiesState._buildRow()</code>:</p>
+<pre><code>    } else if (activity is Task) {
+      Task task = activity as Task;
+      Widget trailing;
+      trailing = Text(&#39;$strDuration&#39;);
+      return ListTile(
+        title: Text(&#39;${activity.name}&#39;),
+        trailing: trailing,
+        onTap: () =&gt; _navigateDownIntervals(index),
+        onLongPress: () {}, // TODO start/stop counting the time for tis task
+      );
+    }    
+</code></pre>
+<pre><code>  void _navigateDownIntervals(int childId) {
+    Navigator.of(context)
+        .push(MaterialPageRoute&lt;void&gt;(builder: (context) =&gt; PageIntervals())
+    );
+  }
+</code></pre>
+<p><strong>6.</strong> Reload and check that when you tap on task <code>transportation</code> the view changes to show its intervals. Also, the up button <img src="img/30aa3e00fa5202f7.png"> in this latter view goes back to the first view even though we have not programmed it. However the home button <img src="img/8d3c69d7936556fc.png"> does nothing yet, it&#39;s up to us to define its behaviour.</p>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="Implement the Java webserver" duration="5">
+        <p>Until now we have been working with fake, fixed data of projects, tasks and intervals. Now we are going to get real data from the Java webserver through its REST API, that is, by http requests.</p>
+<p>We&#39;ll want our webserver to listen to port 8080 and answer to the following requests:</p>
+<ul>
+<li><code>http://10.0.2.2:8080/get_tree?n</code> returns the one-level tree that has as root a certain task or project (thus, an activity) with id equal to <code>n</code>, an integer number. The tree is represented as a JSON string, like those returned by <code>getTree()</code> and <code>getTreeTask()</code> methods in <code>tree.dart</code>.</li>
+<li><code>http://10.0.2.2:8080/start?n</code> and <code>http://10.0.2.2:8080/stop?n</code> do not return any value but start or stop counting time of a task with id equal to <code>n</code></li>
+</ul>
+<p>Open your Java time tracker project and follow these steps:</p>
+<p><strong>1.</strong> Each time a new task, project or interval is instantiated, its constructor gets and stores in an attribute <code>int id</code> a unique id number. Hence, there must be some class in charge of the responsibility to provide unique ids.</p>
+<p><strong>2.</strong> Add the capabilitiy of looking for a project or task with a certain id number. For instance add a recursive method <code>findActivityById(int n)</code> to the <code>Project</code> class.</p>
+<p><strong>3.</strong> Make a new package named <code>webserver</code> and add to it the following two files:</p>
+<p><code>MainWebServer.java</code></p>
+<pre><code>package webserver;
+
+import core.Activity;
+import core.Clock;
+
+public class MainWebServer {
+  public static void main(String[] args) {
+    webServer();
+  }
+
+  public static void webServer() {
+    final Activity root = makeTreeCourses(); 
+    // implement this method that returns the tree of 
+    // appendix A in the practicum handout
+
+    // start your clock
+
+    new WebServer(root);
+  }
+}
+</code></pre>
+<p><code>WebServer.java</code></p>
+<pre><code>package webserver;
+
+import core.Activity;
+import core.Task;
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.PrintWriter;
+import java.net.ServerSocket;
+import java.net.Socket;
+import java.util.StringTokenizer;
+
+// Based on 
+// https://www.ssaurel.com/blog/create-a-simple-http-web-server-in-java
+// http://www.jcgonzalez.com/java-socket-mini-server-http-example
+
+public class WebServer {
+  private static final int PORT = 8080; // port to listen to
+
+  private Activity currentActivity;
+  private final Activity root;
+
+  public WebServer(Activity root) {
+    this.root = root;
+    System.out.println(root);
+    currentActivity = root;
+    try {
+      ServerSocket serverConnect = new ServerSocket(PORT);
+      System.out.println(&#34;Server started.\nListening for connections on port : &#34; + PORT + &#34; ...\n&#34;);
+      // we listen until user halts server execution
+      while (true) {
+        // each client connection will be managed in a dedicated Thread
+        new SocketThread(serverConnect.accept());
+        // create dedicated thread to manage the client connection
+      }
+    } catch (IOException e) {
+      System.err.println(&#34;Server Connection error : &#34; + e.getMessage());
+    }
+  }
+
+  private Activity findActivityById(int id) {
+    return root.findActivityById(id);
+  }
+
+  private class SocketThread extends Thread { 
+    // SocketThread sees WebServer attributes
+    private final Socket insocked; 
+    // Client Connection via Socket Class
+
+    SocketThread(Socket insocket) {
+      this.insocked = insocket;
+      this.start();
+    }
+
+    @Override
+    public void run() {
+      // we manage our particular client connection
+      BufferedReader in;
+      PrintWriter out;
+      String resource;
+
+      try {
+        // we read characters from the client via input stream on the socket
+        in = new BufferedReader(new InputStreamReader(insocked.getInputStream()));
+        // we get character output stream to client
+        out = new PrintWriter(insocked.getOutputStream());
+        // get first line of the request from the client
+        String input = in.readLine();
+        // we parse the request with a string tokenizer
+
+        System.out.println(&#34;sockedthread : &#34; + input);
+
+        StringTokenizer parse = new StringTokenizer(input);
+        String method = parse.nextToken().toUpperCase(); 
+        // we get the HTTP method of the client
+        if (!method.equals(&#34;GET&#34;)) {
+          System.out.println(&#34;501 Not Implemented : &#34; + method + &#34; method.&#34;);
+        } else {
+          // what comes after &#34;localhost:8080&#34;
+          resource = parse.nextToken();
+          System.out.println(&#34;input &#34; + input);
+          System.out.println(&#34;method &#34; + method);
+          System.out.println(&#34;resource &#34; + resource);
+
+          parse = new StringTokenizer(resource, &#34;/[?]=&amp;&#34;);
+          int i = 0;
+          String[] tokens = new String[20]; 
+          // more than the actual number of parameters
+          while (parse.hasMoreTokens()) {
+            tokens[i] = parse.nextToken();
+            System.out.println(&#34;token &#34; + i + &#34;=&#34; + tokens[i]);
+            i++;
+          }
+
+          // Make the answer as a JSON string, to be sent to the Javascript client
+          String answer = makeHeaderAnswer() + makeBodyAnswer(tokens);
+          System.out.println(&#34;answer\n&#34; + answer);
+          // Here we send the response to the client
+          out.println(answer);
+          out.flush(); // flush character output stream buffer
+        }
+
+        in.close();
+        out.close();
+        insocked.close(); // we close socket connection
+      } catch (Exception e) {
+        System.err.println(&#34;Exception : &#34; + e);
+      }
+    }
+
+
+    private String makeBodyAnswer(String[] tokens) {
+      String body = &#34;&#34;;
+      switch (tokens[0]) {
+        case &#34;get_tree&#34; : {
+          int id = Integer.parseInt(tokens[1]);
+          Activity activity = findActivityById(id);
+          assert (activity!=null);
+          body = activity.toJson(1).toString();
+          break;
+        }
+        case &#34;start&#34;: {
+          int id = Integer.parseInt(tokens[1]);
+          Activity activity = findActivityById(id);
+          assert (activity!=null);
+          Task task = (Task) activity;
+          task.start();
+          body = &#34;{}&#34;;
+          break;
+        }
+        case &#34;stop&#34;: {
+          int id = Integer.parseInt(tokens[1]);
+          Activity activity = findActivityById(id);
+          assert (activity!=null);
+          Task task = (Task) activity;
+          task.stop();
+          body = &#34;{}&#34;;
+          break;
+        }
+        // TODO: add new task, project
+        // TODO: edit task, project properties
+        default:
+          assert false;
+      }
+      System.out.println(body);
+      return body;
+    }
+
+    private String makeHeaderAnswer() {
+      String answer = &#34;&#34;;
+      answer += &#34;HTTP/1.0 200 OK\r\n&#34;;
+      answer += &#34;Content-type: application/json\r\n&#34;;
+      answer += &#34;\r\n&#34;; 
+      // blank line between headers and content, very important !
+      return answer;
+    }
+  } // SocketThread
+
+} // WebServer
+</code></pre>
+<p>Note an important detail in this line in method <code>makeBodyAnswer()</code>:</p>
+<pre><code>body = activity.toJson(1).toString();
+</code></pre>
+<p>The 1 means the desired depth of the tree, root plus its children and no more descendants. Each recursive call to <code>toJson</code> decrements the passed depth value, when received depth is zero do nothing.</p>
+<p><strong>4.</strong> To check everything works, open a web browser and go to URL <code>http://localhost:8080/get_tree?0</code>, you should see this:</p>
+<table>
+<tr></tr>
+<tr><td colspan="1" rowspan="1"><p class="image-container"><img src="img/5f26973236884a80.png"></p>
+</td><td colspan="1" rowspan="1"><p class="image-container"><img src="img/ebafbd6f43854092.png"></p>
+</td></tr>
+</table>
+<p><strong>5.</strong> You can also try to start and stop the task. Finding the id of the task named <code>transportation</code> (suppose it&#39;s 6) and then go to <code>http://localhost:8080/start?6</code>, wait some seconds, go to <code>http://localhost:8080/stop?6</code> and <code>http://localhost:8080/get_tree?6</code> to check an interval has been created and duration is some seconds.</p>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="Connect the Flutter app to the Java webserver" duration="5">
+        <p>Now switch to the Flutter project. We have to add code to send http requests to the server and get the corresponding answer. This answer is only needed for the <code>get_tree</code> request because it contains what we have to show next in the interface.</p>
+<p>Read <a href="https://flutter.dev/docs/cookbook/networking/update-data" target="_blank">this part</a> of the Flutter documentation to understand the code below.</p>
+<p><strong>1.</strong> Make a new file <code>requests.dart</code> with the following content:</p>
+<pre><code>import &#39;dart:convert&#39; as convert;
+import &#39;package:http/http.dart&#39; as http;
+import &#39;tree.dart&#39;;
+
+final http.Client client = http.Client();
+// better than http.get() if multiple requests to the same server
+
+// If you connect the Android emulator to the webserver listening to localhost:8080
+const String baseUrl = &#34;http://10.0.2.2:8080&#34;;
+
+// If instead you want to use a real phone, run this command in the linux terminal
+//   ssh -R joans.serveousercontent.com:80:localhost:8080 serveo.net
+//const String baseUrl = &#34;https://joans.serveousercontent.com&#34;;
+
+Future&lt;Tree&gt; getTree(int id) async {
+  String uri = &#34;$baseUrl/get_tree?$id&#34;;
+  final response = await client.get(uri);
+  // response is NOT a Future because of await but since getTree() is async,
+  // execution continues (leaves this function) until response is available,
+  // and then we come back here
+  if (response.statusCode == 200) {
+    print(&#34;statusCode=$response.statusCode&#34;);
+    print(response.body);
+    // If the server did return a 200 OK response, then parse the JSON.
+    Map&lt;String, dynamic&gt; decoded = convert.jsonDecode(response.body);
+    return Tree(decoded);
+  } else {
+    // If the server did not return a 200 OK response, then throw an exception.
+    print(&#34;statusCode=$response.statusCode&#34;);
+    throw Exception(&#39;Failed to get children&#39;);
+  }
+}
+
+Future&lt;void&gt; start(int id) async {
+  String uri = &#34;$baseUrl/start?$id&#34;;
+  final response = await client.get(uri);
+  if (response.statusCode == 200) {
+    print(&#34;statusCode=$response.statusCode&#34;);
+  } else {
+    print(&#34;statusCode=$response.statusCode&#34;);
+    throw Exception(&#39;Failed to get children&#39;);
+  }
+}
+
+Future&lt;void&gt; stop(int id) async {
+  String uri = &#34;$baseUrl/stop?$id&#34;;
+  final response = await client.get(uri);
+  if (response.statusCode == 200) {
+    print(&#34;statusCode=$response.statusCode&#34;);
+  } else {
+    print(&#34;statusCode=$response.statusCode&#34;);
+    throw Exception(&#39;Failed to get children&#39;);
+  }
+}
+</code></pre>
+<p><strong>2.</strong> Open <code>pubspec.yaml</code> and add the <code>http</code> library dependence</p>
+<pre><code>dependencies:
+  http: ^0.12.0+4
+  intl: ^0.16.1
+  flutter:
+    sdk: flutter
+</code></pre>
+<p>go back to <code>requests.dart</code> and click on <code>Get dependencies</code>.</p>
+<p><strong>3.</strong> Add attribute id to <code>PageActivities</code></p>
+<pre><code>class PageActivities extends StatefulWidget {
+  int id;
+
+  PageActivities(this.id);
+</code></pre>
+<p><strong>4.</strong> Update <code>main.dart</code> adding parameter 0 to the constructor which means that we are going to start the applicacion showing children&#39;s root because by convention (you have to enforce it in your Java timetracker project) the root has id 0.</p>
+<pre><code>home: PageActivities(0)
+</code></pre>
+<p><strong>5.</strong> Update class <code>_PageActivitiesState</code> to obtain the id from <code>PageActivities</code> and from it the one-level tree through an http request. Since we don&#39;t konw when the response will be available we have to introduce futures.</p>
+<pre><code>import &#39;package:codelab_timetracker/tree.dart&#39; hide getTree;
+// the old getTree()
+import &#39;package:codelab_timetracker/requests.dart&#39;;
+// has the new getTree() that sends an http request to the server
+</code></pre>
+<pre><code>class _PageActivitiesState extends State&lt;PageActivities&gt; {
+  int id;
+  Future&lt;Tree&gt; futureTree;
+
+  @override
+  void initState() {
+    super.initState();
+    id = widget.id; // of PageActivities
+    futureTree = getTree(id);
+  }
+</code></pre>
+<p><strong>6.</strong> Update <code>build()</code> and <code>_buildRow()</code> to user futures. See how to use futures with a listview in this <a href="https://medium.com/nonstopio/flutter-future-builder-with-list-view-builder-d7212314e8c9" target="_blank">post</a></p>
+<pre><code>  // future with listview
+  // https://medium.com/nonstopio/flutter-future-builder-with-list-view-builder-d7212314e8c9
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder&lt;Tree&gt;(
+      future: futureTree,
+      // this makes the tree of children, when available, go into snapshot.data
+      builder: (context, snapshot) {
+        // anonymous function
+        if (snapshot.hasData) {
+          return Scaffold(
+            appBar: AppBar(
+              title: Text(snapshot.data.root.name),
+              actions: &lt;Widget&gt;[
+                IconButton(icon: Icon(Icons.home),
+                    onPressed: () {} // TODO go home page = root
+                ),
+                //TODO other actions
+              ],
+            ),
+            body: ListView.separated(
+              // it&#39;s like ListView.builder() but better because it includes a separator between items
+              padding: const EdgeInsets.all(16.0),
+              itemCount: snapshot.data.root.children.length,
+              itemBuilder: (BuildContext context, int index) =&gt;
+                  _buildRow(snapshot.data.root.children[index], index),
+              separatorBuilder: (BuildContext context, int index) =&gt;
+                  const Divider(),
+            ),
+          );
+        } else if (snapshot.hasError) {
+          return Text(&#34;${snapshot.error}&#34;);
+        }
+        // By default, show a progress indicator
+        return Container(
+            height: MediaQuery.of(context).size.height,
+            color: Colors.white,
+            child: Center(
+              child: CircularProgressIndicator(),
+            ));
+      },
+    );
+  }
+</code></pre>
+<pre><code>  Widget _buildRow(Activity activity, int index) {
+    String strDuration = Duration(seconds: activity.duration).toString().split(&#39;.&#39;).first;
+    // split by &#39;.&#39; and taking first element of resulting list removes the microseconds part
+    if (activity is Project) {
+      return ListTile(
+        title: Text(&#39;${activity.name}&#39;),
+        trailing: Text(&#39;$strDuration&#39;),
+        onTap: () =&gt; _navigateDownActivities(activity.id),
+      );
+    } else if (activity is Task) {
+      Task task = activity as Task; 
+      // at the moment is the same, maybe changes in the future
+      Widget trailing;
+      trailing = Text(&#39;$strDuration&#39;);
+
+      return ListTile(
+        title: Text(&#39;${activity.name}&#39;),
+        trailing: trailing,
+        onTap: () =&gt; _navigateDownIntervals(activity.id),
+        onLongPress: () {}, // TODO start/stop counting the time for tis task
+      );
+    }
+  }
+</code></pre>
+<p><strong>7.</strong> Update <code>_navigateDownIntervals()</code> and add <code>_navigateDownActivities()</code> so that we pass the position of the element on which we have tapped to the constructor of <code>PageActivities</code> and <code>PageIntervals</code>. Then, in the <code>initState</code> they send the http request to get the children of this element, either projects and tasks or intervals.</p>
+<pre><code>  void _navigateDownActivities(int childId) {
+    Navigator.of(context)
+        .push(MaterialPageRoute&lt;void&gt;(
+          builder: (context) =&gt; PageActivities(childId),
+        ));
+  }
+
+  void _navigateDownIntervals(int childId) {
+    Navigator.of(context)
+        .push(MaterialPageRoute&lt;void&gt;(
+          builder: (context) =&gt; PageIntervals(childId),
+        ));
+  }
+</code></pre>
+<p><strong>8.</strong> There is still a problem because we need to update <code>PageIntervals</code> like we have done with <code>PageActivities</code>, first introduce id and futures, then update <code>build()</code> (but not <code>_buildRow()</code>):</p>
+<pre><code>import &#39;package:codelab_timetracker/tree.dart&#39; as Tree hide getTree;
+// to avoid collision with an Interval class in another library
+import &#39;package:codelab_timetracker/requests.dart&#39;;
+</code></pre>
+<pre><code>class PageIntervals extends StatefulWidget {
+  int id;
+
+  PageIntervals(this.id);
+</code></pre>
+<pre><code>class _PageIntervalsState extends State&lt;PageIntervals&gt; {
+  int id;
+  Future&lt;Tree.Tree&gt; futureTree;
+
+  @override
+  void initState() {
+    super.initState();
+    id = widget.id;
+    futureTree = getTree(id);
+  }
+</code></pre>
+<pre><code>  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder&lt;Tree.Tree&gt;(
+      future: futureTree,
+      // this makes the tree of children, when available, go into snapshot.data
+      builder: (context, snapshot) {
+        // anonymous function
+        if (snapshot.hasData) {
+          int numChildren = snapshot.data.root.children.length;
+          return Scaffold(
+            appBar: AppBar(
+              title: Text(snapshot.data.root.name),
+              actions: &lt;Widget&gt;[
+                IconButton(icon: Icon(Icons.home),
+                    onPressed: () {}, // TODO
+                )
+              ],
+            ),
+            body: ListView.separated(
+              // it&#39;s like ListView.builder() but better because it includes a separator between items
+              padding: const EdgeInsets.all(16.0),
+              itemCount: numChildren,
+              itemBuilder: (BuildContext context, int index) =&gt;
+                  _buildRow(snapshot.data.root.children[index], index),
+              separatorBuilder: (BuildContext context, int index) =&gt;
+              const Divider(),
+            ),
+          );
+        } else if (snapshot.hasError) {
+          return Text(&#34;${snapshot.error}&#34;);
+        }
+        // By default, show a progress indicator
+        return Container(
+            height: MediaQuery.of(context).size.height,
+            color: Colors.white,
+            child: Center(
+              child: CircularProgressIndicator(),
+            ));
+      },
+    );
+  }
+</code></pre>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="Home button" duration="1">
+        <p>In method <code>build()</code> of <code>PageActivities.dart</code><em>and</em><code>PageIntervals.dart</code> do</p>
+<pre><code>IconButton(icon: Icon(Icons.home),
+  onPressed: () {
+  while(Navigator.of(context).canPop()) {
+    print(&#34;pop&#34;);
+    Navigator.of(context).pop();
+  }
+  /* this works also:
+  Navigator.popUntil(context, ModalRoute.withName(&#39;/&#39;));
+  */
+  PageActivities(0);
+}),
+</code></pre>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="Count the time" duration="3">
+        <p>Now the navigation throughout the tree of projects, tasks and intervals is complete. However, we can&#39;t yet start/stop a task. We have to ask for it by providing a function to the <code>onLongPress</code> parameter of <code>ListView</code> constructor in <code>PageActivities._buildRow()</code>:</p>
+<pre><code>onLongPress: () {
+  if ((activity as Task).active) {
+    stop(activity.id);
+  } else {
+    start(activity.id);
+  }
+},
+</code></pre>
+<p>Once a task is started, when we navigate to its content we see a new interval. If we go up and down again, we can see the duration and final dates are updated. But there are several problems:</p>
+<ol type="1">
+<li>the duration of the task shown in the home screen does not change, as we would like to see</li>
+<li>only when we ‘go down&#39; we see the duration up to date, and not when we ‘go up&#39;</li>
+<li>likewise, duration and final date of the new interval changes only when we enter into this screen (‘go down&#39;)</li>
+<li>duration (and final date in the case of the intervals screen) does not change when a task is active or a project has an active task among its descendants</li>
+</ol>
+<p>The problem is that we are not updating the state of the screen showing the task, and we only update the state of the intervals screen when we go down because this is implicit. We have to tell Flutter the state has changed so it can redraw the screen.</p>
+<p>Read this <a href="//https://stackoverflow.com/questions/49830553/how-to-go-back-and-refresh-the-previous-page-in-flutter?noredirect=1&lq=1" target="_blank">post</a> for an in depth explanation.</p>
+<p>In <code>page_activities.dart</code>, do these changes:</p>
+<pre><code>void _refresh() async {
+  futureTree = getTree(id); // to be used in build()
+  setState(() {});
+}
+</code></pre>
+<p>The assignment of <code>futureTree</code> should go in the setState body but Flutter documentation recommends to put futures and asyncs inside it, this is why the body is empty.</p>
+<pre><code>onLongPress: () {
+  if ((activity as Task).active) {
+    stop(activity.id);
+    _refresh(); // to show immediately that task has started
+  } else {
+    start(activity.id);
+    _refresh(); // to show immediately that task has stopped
+  }
+},
+</code></pre>
+<pre><code>void _navigateDownActivities(int childId) {
+  // we can not do just _refresh() because then the up arrow doesnt appear in the appbar
+  Navigator.of(context)
+      .push(MaterialPageRoute&lt;void&gt;(
+        builder: (context) =&gt; PageActivities(childId),
+      )).then( (var value) {
+        _refresh();
+  });
+}
+</code></pre>
+<pre><code>void _navigateDownIntervals(int childId) {
+  Navigator.of(context)
+      .push(MaterialPageRoute&lt;void&gt;(
+        builder: (context) =&gt; PageIntervals(childId),
+      )).then( (var value) {
+        _refresh();
+  });
+  //https://stackoverflow.com/questions/49830553/how-to-go-back-and-refresh-the-previous-page-in-flutter?noredirect=1&amp;lq=1
+}
+</code></pre>
+<p>With this we solve problems 1-3 but no yet 4, that is, showing the data of active tasks, projects and intervals all the time, not just when we go up and down. We need some mechanism to periodically update the screen. We&#39;ll address this in the next section.</p>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="Automatic refresh" duration="6">
+        <p>The solution to the periodic refresh of a screen is copied from this <a href="https://stackoverflow.com/questions/53919391/refresh-flutter-text-widget-content-every-5-minutes-or-periodically" target="_blank">post</a>.</p>
+<p>We&#39;ll update the state of the screen periodically by first adding a <code>Timer</code> attribute to _PageActivitiesState and then _PageIntervalsState. For the moment we&#39;ll work on the first class.</p>
+<p><strong>1.</strong> Add a <code>Timer</code> attribute and periode refresh like in the code below. You&#39;ll need to import the <code>async</code> library. More on the Timer class in the Flutter <a href="https://api.flutter.dev/flutter/dart-async/Timer-class.html" target="_blank">reference documentation</a> and usage examples in this <a href="https://fluttermaster.com/tips-to-use-timer-in-dart-and-flutter/" target="_blank">post</a>.</p>
+<pre><code>import &#39;dart:async&#39;;
+
+class _PageActivitiesState extends State&lt;PageActivities&gt; {
+  int id;
+  Future&lt;Tree&gt; futureTree;
+
+  Timer _timer;
+  static const int periodeRefresh = 6; 
+  // better a multiple of periode in TimeTracker, 2 seconds
+</code></pre>
+<p><strong>2.</strong> Add method <code>_activateTimer()</code> that initializes it and specifies what to do every periode. The opposite action, deactivate the timer, is simply <code>_timer.cancel()</code>.</p>
+<pre><code>void _activateTimer() {
+  _timer = Timer.periodic(Duration(seconds: periodeRefresh), (Timer t) {
+    futureTree = getTree(id);
+    setState(() {});
+  });
+}
+</code></pre>
+<p><strong>3.</strong> Now write the sentences to activate and deactivate the timer. Activation must happen each time we show the screen, the very first time it shows and subsequent times when we ‘go down&#39; from its parent and show it. Also, each time we ‘go down&#39;, to either another projects/tasks screen or an intervals screen and then ‘go up&#39;.</p>
+<p>We have to stop the timer when we ‘go down&#39; and ‘go up&#39;. Just in case, we do it also at the <code>dispose</code> method.</p>
+<pre><code>@override
+void initState() {
+  super.initState();
+  id = widget.id;
+  futureTree = getTree(id);
+  _activateTimer();
+}
+</code></pre>
+<pre><code>void _navigateDownActivities(int childId) {
+  _timer.cancel();
+  // we can not do just _refresh() because then the up arrow doesnt appear in the appbar
+  Navigator.of(context)
+      .push(MaterialPageRoute&lt;void&gt;(
+        builder: (context) =&gt; PageActivities(childId),
+      )).then( (var value) {
+        _activateTimer();
+        _refresh();
+  });
+  //https://stackoverflow.com/questions/49830553/how-to-go-back-and-refresh-the-previous-page-in-flutter?noredirect=1&amp;lq=1
+}
+
+void _navigateDownIntervals(int childId) {
+  _timer.cancel();
+  Navigator.of(context)
+      .push(MaterialPageRoute&lt;void&gt;(
+        builder: (context) =&gt; PageIntervals(childId),
+      )).then( (var value) {
+        _activateTimer();
+        _refresh();
+  });
+}
+</code></pre>
+<p>Note that both <code>_activateTimer()</code> and <code>_refresh()</code> get the updated one-level tree to show and change the state to provoke redrawing the screen, so it seems we could get rid of <code>_refresh</code>. But then the problem is that when we start a task are not going to see changes until after 6 seconds later (at most). Since we want the interface to be responsive, we keep it.</p>
+<pre><code>@override
+void dispose() {
+  // &#34;The framework calls this method when this State object will never build again&#34;
+  // therefore when going up
+  _timer.cancel();
+  super.dispose();
+}
+</code></pre>
+<p><strong>5.</strong> Run the application doing a hot reload and you&#39;ll see that when you start a task, its duration and that of the antecessor projects us updated automatically every 6 seconds. But not the intervals screen. To do so, in class <code>_PageIntervalsState</code> do the same as in <code>_PageActivitiesState</code>:</p>
+<ul>
+<li>add the attributes <code>_timer</code> and <code>periodeRefresh</code> (set to 6 seconds)</li>
+<li>add sentence <code>_activateTimer();</code> to method <code>initState()</code></li>
+<li>copy the methods <code>_activateTimer()</code> and <code>dispose()</code> (later we should somehow avoid this redundacy)</li>
+</ul>
+<p><strong>6.</strong> Run again the application and check that also the duration and final date of the active interval changes periodically.</p>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="Format date and time" duration="7">
+        <p>We leave two details for you to implement:</p>
+<ul>
+<li>Dates and duration are formated with the same expressions in several places. Make utility functions <code>formatDuration()</code> and <code>formatDate()</code> to avoid redundancy and allow modifying the output format with a single change in the code. This can be useful for localization of the app.</li>
+<li>There is no cue to show what is active at each moment (task, last interval of an active task, project with an active task as decendant). Add it to the interface. For instance show a clock icon and/or change the color of the text.</li>
+</ul>
+
+
+      </google-codelab-step>
+    
+  </google-codelab>
+
+  <script src="https://storage.googleapis.com/codelab-elements/native-shim.js"></script>
+  <script src="https://storage.googleapis.com/codelab-elements/custom-elements.min.js"></script>
+  <script src="https://storage.googleapis.com/codelab-elements/prettify.js"></script>
+  <script src="https://storage.googleapis.com/codelab-elements/codelab-elements.js"></script>
+
+</body>
+</html>

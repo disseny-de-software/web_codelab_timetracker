@@ -1,0 +1,28 @@
+{
+  "environment": "web",
+  "format": "html",
+  "prefix": "https://storage.googleapis.com",
+  "mainga": "UA-49880327-14",
+  "updated": "2020-07-13T13:16:09+02:00",
+  "id": "timetracker-in-flutter",
+  "duration": 36,
+  "title": "TimeTracker app",
+  "summary": "Time Tracker app in Flutter",
+  "source": "timetracker_app.md",
+  "theme": "",
+  "status": [
+    "published"
+  ],
+  "category": [
+    "codelab",
+    "markdown"
+  ],
+  "tags": [
+    "dart",
+    "flutter",
+    "json",
+    "web"
+  ],
+  "feedback": "cv.uab.es",
+  "url": "timetracker-in-flutter"
+}
